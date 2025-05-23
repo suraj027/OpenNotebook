@@ -1,0 +1,5 @@
+{
+  "name": "marked",
+  "description": "A markdown parser and compiler. Built for speed.",
+  "version": "9.1.2"
+}
