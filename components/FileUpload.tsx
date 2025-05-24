@@ -1,4 +1,3 @@
-
 import React, { useCallback, useState } from 'react';
 import { UPLOAD_ICON } from '../constants';
 
@@ -16,18 +15,12 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading }) => {
     }
   };
 
-  // Fix: Changed React.DragEvent<HTMLDivElement> to React.DragEvent<HTMLLabelElement>
   const handleDrag = useCallback((event: React.DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    if (event.type === "dragenter" || event.type === "dragover") {
-      setDragActive(true);
-    } else if (event.type === "dragleave") {
-      setDragActive(false);
-    }
+    setDragActive(event.type === "dragenter" || event.type === "dragover");
   }, []);
 
-  // Fix: Changed React.DragEvent<HTMLDivElement> to React.DragEvent<HTMLLabelElement>
   const handleDrop = useCallback((event: React.DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -37,24 +30,27 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading }) => {
     }
   }, [onFileSelect]);
 
-
   return (
-    <div className="w-full p-6 bg-white rounded-lg shadow-md">
+    <div className="w-full p-6 bg-slate-800/50 rounded-2xl shadow-lg border border-slate-700/50 backdrop-blur-sm">
       <label
         htmlFor="pdf-upload"
         onDragEnter={handleDrag}
         onDragOver={handleDrag}
         onDragLeave={handleDrag}
         onDrop={handleDrop}
-        className={`flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-lg cursor-pointer transition-colors
-                    ${dragActive ? "border-primary-500 bg-primary-50" : "border-gray-300 hover:border-gray-400 bg-gray-50 hover:bg-gray-100"}`}
+        className={`flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200
+                    ${dragActive 
+                      ? "border-primary-500 bg-primary-500/10" 
+                      : "border-slate-600 hover:border-primary-500/50 bg-slate-800/50 hover:bg-slate-800"}`}
       >
         <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
+          <div className="w-12 h-12 mb-4 text-slate-400">
             {UPLOAD_ICON}
-          <p className="mb-2 text-sm text-gray-500">
+          </div>
+          <p className="mb-2 text-sm text-slate-300">
             <span className="font-semibold">Click to upload</span> or drag and drop
           </p>
-          <p className="text-xs text-gray-500">PDF files only (max 10MB recommended)</p>
+          <p className="text-xs text-slate-500">PDF files only (max 10MB recommended)</p>
         </div>
         <input
           id="pdf-upload"
@@ -65,7 +61,11 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading }) => {
           disabled={isLoading}
         />
       </label>
-      {isLoading && <p className="text-sm text-primary-600 mt-2 text-center">Processing PDF...</p>}
+      {isLoading && (
+        <p className="text-sm text-primary-400 mt-3 text-center animate-pulse">
+          Processing PDF...
+        </p>
+      )}
     </div>
   );
 };
