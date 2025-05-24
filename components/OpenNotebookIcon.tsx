@@ -5,7 +5,7 @@ import React from 'react';
 
 const OpenNotebookIcon: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className = '', style = {} }) => (
   <img
-    src="open_notebook_icon_transparent.png"
+    src="/open_notebook_icon_transparent.png"
     alt="OpenNotebook Icon"
     className={className}
     style={style}
