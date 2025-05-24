@@ -1,37 +1,15 @@
-
-// Fix: Added Content to the import from @google/genai
 import { GoogleGenAI, Chat, GenerateContentResponse, Part, Content } from "@google/genai";
 import { ChatMessage, QuizItem } from '../types';
 
-let apiKeyFromEnv: string | undefined;
-try {
-    // This check ensures 'process', 'process.env', and 'process.env.API_KEY' are accessed safely.
-    if (typeof process !== 'undefined' &&
-        typeof process.env !== 'undefined' &&
-        typeof process.env.API_KEY === 'string' &&
-        process.env.API_KEY.length > 0) { // Ensure API_KEY is a non-empty string
-        apiKeyFromEnv = process.env.API_KEY;
-    }
-} catch (e) {
-    // This catch is a fallback, though the typeof checks should prevent ReferenceErrors for 'process'.
-    console.warn("Could not safely access process.env.API_KEY. This might be an environment without Node.js 'process' defined or API_KEY is not a string.", e);
-}
-
-const EFFECTIVE_API_KEY = apiKeyFromEnv;
-
-if (!EFFECTIVE_API_KEY) {
-  console.error(
-    "CRITICAL: API_KEY environment variable not found, is empty, or is not a string. " +
-    "PDF Insights Genie's core features will not function. " +
-    "Ensure process.env.API_KEY is correctly set in your environment."
-  );
-}
+// --- BEGIN: Hardcoded Gemini API Key ---
+const EFFECTIVE_API_KEY = "AIzaSyATGsGnMeFrBhR68W4otODTttRqv8fsWME";
+// --- END: Hardcoded Gemini API Key ---
 
 // The GoogleGenAI constructor requires an apiKey argument (string).
 // If EFFECTIVE_API_KEY is undefined (not found or invalid), pass a non-empty placeholder string.
 // SDK calls will fail, and this is handled in each function by checking EFFECTIVE_API_KEY.
 // This prevents the constructor itself from throwing due to a missing/undefined key argument.
-const ai = new GoogleGenAI({ apiKey: EFFECTIVE_API_KEY || "MISSING_API_KEY_PLACEHOLDER" });
+const ai = new GoogleGenAI({ apiKey: EFFECTIVE_API_KEY });
 
 let activeChat: Chat | null = null;
 let currentPdfContextForChat: string | null = null;
@@ -50,7 +28,7 @@ export const summarizeText = async (text: string): Promise<string> => {
         contents: prompt,
     });
 
-    return response.text;
+    return response.text || "";
   } catch (error) {
     console.error("Error summarizing text:", error);
     return "Error: Could not summarize the document.";
@@ -85,7 +63,7 @@ export const getChatResponse = async (history: ChatMessage[], newMessage: string
     }
     
     const response = await activeChat.sendMessage({ message: newMessage });
-    return response.text;
+    return response.text || "";
 
   } catch (error) {
     console.error("Error getting chat response:", error);
@@ -122,7 +100,7 @@ Guest: (thoughtfully) Well, you know, the section on climate impact really stood
         model: model,
         contents: prompt,
     });
-    return response.text;
+    return response.text || "";
   } catch (error) {
     console.error("Error generating podcast script:", error);
     return "Error: Could not generate the podcast script.";
@@ -166,7 +144,7 @@ ${text.substring(0, 15000)}
       },
     });
 
-    let jsonStr = response.text.trim();
+    let jsonStr = (response.text || "").trim();
     const fenceRegex = /^```(\w*)?\s*\n?(.*?)\n?\s*```$/s;
     const match = jsonStr.match(fenceRegex);
     if (match && match[2]) {
@@ -186,7 +164,7 @@ ${text.substring(0, 15000)}
       // Fallback: Try to extract lines if it's not JSON but simple list
       if (!jsonStr.includes("[") && !jsonStr.includes("{")) { // Not looking like JSON
         const numListRegex = /^\d+\\.\s/; // Matches "1. ", "2. ", etc.
-        const lines = response.text.split('\n').filter(line => 
+        const lines = (response.text || "").split('\n').filter(line => 
             line.trim().length > 0 && 
             (line.trim().startsWith("- ") || line.trim().startsWith("* ") || numListRegex.test(line.trim()))
         );
@@ -241,7 +219,7 @@ ${text.substring(0, 15000)}
       },
     });
 
-    let jsonStr = response.text.trim();
+    let jsonStr = (response.text || "").trim();
     const fenceRegex = /^```(\w*)?\s*\n?(.*?)\n?\s*```$/s;
     const match = jsonStr.match(fenceRegex);
     if (match && match[2]) {
@@ -278,7 +256,7 @@ ${text.substring(0, 15000)}
       console.error("Failed to parse JSON response for quiz:", e, "\nRaw response text:", response.text);
        // Fallback if not JSON but a list of lines like Q: ... A: ...
       if (!jsonStr.includes("[") && !jsonStr.includes("{")) {
-        const lines = response.text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        const lines = (response.text || "").split('\n').map(l => l.trim()).filter(l => l.length > 0);
         const salvagedItems: QuizItem[] = [];
         const qRegex = /Q(?:uestion)?[\s\d.-]*:(.*)/i;
         const aRegex = /A(?:nswer)?[\s\d.-]*:(.*)/i;
@@ -353,7 +331,7 @@ ${text.substring(0, 15000)}
       },
     });
 
-    let jsonStr = response.text.trim();
+    let jsonStr = (response.text || "").trim();
     const fenceRegex = /^```(\w*)?\s*\n?(.*?)\n?\s*```$/s;
     const match = jsonStr.match(fenceRegex);
     if (match && match[2]) {
@@ -372,7 +350,7 @@ ${text.substring(0, 15000)}
       console.error("Failed to parse JSON response for further reading:", e, "\nRaw response text:", response.text);
       // Fallback: Try to extract lines if it's not JSON but simple list
        if (!jsonStr.includes("[") && !jsonStr.includes("{")) { 
-        const lines = response.text.split('\n').filter(line => 
+        const lines = (response.text || "").split('\n').filter(line => 
             line.trim().length > 0 && 
             (line.trim().startsWith("- ") || line.trim().startsWith("* ") || /^\d+\.\s/.test(line.trim()))
         );

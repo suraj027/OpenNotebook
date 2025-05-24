@@ -6,9 +6,9 @@ This contains everything you need to run your app locally.
 
 **Prerequisites:**  Node.js
 
-
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Run the app:
    `npm run dev`
+
+> **Note:** API keys for Gemini and Google TTS are now embedded directly in the code for development/demo purposes. You do not need to set up a `.env.local` file.

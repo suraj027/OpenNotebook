@@ -1,4 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { ChatMessage, PdfNote, QuizItem } from './types'; // AppView might be deprecated or redefined
 import { 
   APP_LOGO_ICON, PLUS_ICON, ELLIPSIS_VERTICAL_ICON,
@@ -14,19 +16,6 @@ import { generateAudioFromGoogleTTS } from './services/googleTtsService';
 import Spinner from './components/common/Spinner';
 import Alert from './components/common/Alert';
 
-
-let apiKeyIsPresent = false;
-try {
-    if (typeof process !== 'undefined' &&
-        typeof process.env !== 'undefined' &&
-        typeof process.env.API_KEY === 'string' &&
-        process.env.API_KEY.length > 0) {
-        apiKeyIsPresent = true;
-    }
-} catch (e) {
-    console.warn("App.tsx: Could not safely access process.env.API_KEY.", e);
-}
-const API_KEY_CONFIGURED = apiKeyIsPresent;
 
 const HOST_VOICE_NAME = 'en-US-Chirp3-HD-Autonoe'; 
 const GUEST_VOICE_NAME = 'en-US-Chirp3-HD-Schedar';
@@ -77,6 +66,12 @@ const cleanDisplayName = (name: string | null | undefined, defaultName: string =
   return cleanedName.trim() || defaultName;
 };
 
+// Helper for safe markdown rendering (always returns string)
+function renderMarkdown(md: string) {
+  // marked.parseSync is not standard, so fallback to marked.parse and ensure string
+  const html = (typeof marked.parse === 'function') ? marked.parse(md) : '';
+  return typeof html === 'string' ? html : '';
+}
 
 const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProcessed, onNoteProcessed, onBackToDashboard }) => {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -163,30 +158,58 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
   }, [initialFile]); 
 
   useEffect(() => {
-    if (initialNote) {
-        setPdfName(initialNote.name);
-        setPdfText(initialNote.pdfText);
-        setSummary(initialNote.summary);
-        if (initialNote.podcastScript && autoAudioInitiatedForScriptContentRef.current !== initialNote.podcastScript) {
-            setPodcastScript(initialNote.podcastScript);
-        }
-        setPdfFile(null); 
-        setRepurposingSuggestions(null);
-        setRepurposingSuggestionsError(null);
-        setQuizItems(null);
-        setQuizError(null);
-        setRevealedAnswers({});
-        setFurtherReadingSuggestions(null);
-        setFurtherReadingError(null);
-    }
+    // Only update summary from initialNote if this is the first mount or a new file is loaded
+    setPdfName(initialNote?.name || null);
+    setPdfText(initialNote?.pdfText || null);
+    setPodcastScript(initialNote?.podcastScript || null);
+    setPdfFile(null);
+    setRepurposingSuggestions(null);
+    setRepurposingSuggestionsError(null);
+    setQuizItems(null);
+    setQuizError(null);
+    setRevealedAnswers({});
+    setFurtherReadingSuggestions(null);
+    setFurtherReadingError(null);
+    setIsLoadingRepurposingSuggestions(false);
+    setIsLoadingQuiz(false);
+    setIsLoadingFurtherReading(false);
+    setPodcastAudioError(null);
+    setPodcastScriptRateLimitInfo(null);
+    setPodcastSegments([]);
+    setCurrentPlayingSegmentIndex(null);
+    setIsGeneratingAllAudio(false);
+    setPodcastDurations({});
+    setOverallPodcastDuration(0);
+    setCurrentOverallPlaybackTime(0);
+    setIsPodcastPlaying(false);
+    // Only set summary if it is not already set or if the file is new
+    setSummary(prev => (initialNote?.summary && (!prev || initialNote.name !== pdfName)) ? initialNote.summary : prev);
   }, [initialNote]);
 
-  useEffect(() => { // Auto-generate script if summary is available and script isn't
-    if (summary && !podcastScript && !isLoadingPodcastScript && API_KEY_CONFIGURED && !podcastScriptRateLimitInfo) {
+  // --- Fix: Only generate summary and podcast script ONCE per file upload ---
+  // Track last file name for which summary/script was generated
+  const lastSummaryFileRef = useRef<string | null>(null);
+  const lastPodcastScriptSummaryRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Only generate summary if pdfText is set, summary is not, and file is new
+    if (pdfText && !summary && pdfName && lastSummaryFileRef.current !== pdfName) {
+      lastSummaryFileRef.current = pdfName;
+      setIsLoadingSummary(true);
+      summarizeText(pdfText).then((sum) => {
+        setSummary(sum);
+        setIsLoadingSummary(false);
+      });
+    }
+  }, [pdfText, summary, pdfName]);
+
+  useEffect(() => {
+    // Only generate podcast script if summary is set, script is not, and summary is new
+    if (summary && !podcastScript && !isLoadingPodcastScript && lastPodcastScriptSummaryRef.current !== summary) {
+      lastPodcastScriptSummaryRef.current = summary;
       handleGeneratePodcastScript();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary, podcastScript, isLoadingPodcastScript, API_KEY_CONFIGURED, podcastScriptRateLimitInfo]);
+  }, [summary, podcastScript, isLoadingPodcastScript, podcastScriptRateLimitInfo]);
 
 
   useEffect(() => { // Cleanup object URLs
@@ -197,6 +220,7 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
     };
   }, []);
 
+  // --- Reset all tracking refs on new file upload ---
   const resetStateForNewFile = () => {
     setPdfText(null);
     setSummary(null);
@@ -212,32 +236,27 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
     autoAudioInitiatedForScriptContentRef.current = null;
     setError(null);
     setPodcastScriptRateLimitInfo(null);
-
     setPodcastDurations({});
     setIsLoadingDurations(false);
     setOverallPodcastDuration(0);
     setCurrentOverallPlaybackTime(0);
     setIsPodcastPlaying(false);
-    
     setRepurposingSuggestions(null);
     setIsLoadingRepurposingSuggestions(false);
     setRepurposingSuggestionsError(null);
-
     setQuizItems(null);
     setIsLoadingQuiz(false);
     setQuizError(null);
     setRevealedAnswers({});
-
     setFurtherReadingSuggestions(null);
     setIsLoadingFurtherReading(false);
     setFurtherReadingError(null);
+    lastSummaryFileRef.current = null;
+    lastPodcastScriptSummaryRef.current = null;
+    lastAudioScriptRef.current = null;
   };
 
   const handleFileSelect = useCallback(async (file: File) => {
-    if (!API_KEY_CONFIGURED) {
-      setError("API Key is not configured.");
-      return;
-    }
     resetStateForNewFile(); 
     setPdfFile(file);
     const newPdfName = file.name;
@@ -270,7 +289,7 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
   }, [onNoteProcessed]); 
 
   const handleSendMessage = useCallback(async () => {
-    if (!userInput.trim() || !pdfText || isLoadingChat || !API_KEY_CONFIGURED) return;
+    if (!userInput.trim() || !pdfText || isLoadingChat) return;
     const newUserMessage: ChatMessage = { id: Date.now().toString(), role: 'user', text: userInput, timestamp: Date.now() };
     setChatMessages(prev => [...prev, newUserMessage]);
     setUserInput(''); setIsLoadingChat(true); setError(null);
@@ -287,9 +306,8 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
   }, [userInput, pdfText, chatMessages, isLoadingChat]);
 
   const handleGeneratePodcastScript = useCallback(async () => {
-    if (!summary || isLoadingPodcastScript || !API_KEY_CONFIGURED || !pdfName || !pdfText || podcastScriptRateLimitInfo) {
+    if (!summary || isLoadingPodcastScript || !pdfName || !pdfText || podcastScriptRateLimitInfo) {
         if (!summary) console.warn("handleGeneratePodcastScript: No summary available.");
-        else if(!API_KEY_CONFIGURED) setError("API Key not configured.");
         else if(podcastScriptRateLimitInfo) console.warn("handleGeneratePodcastScript: Rate limit cooldown active.");
         else console.warn("handleGeneratePodcastScript: PDF name or text is missing.");
         return;
@@ -327,9 +345,8 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
   }, [summary, isLoadingPodcastScript, pdfName, pdfText, onNoteProcessed, podcastScriptRateLimitInfo]);
 
   const handleGenerateRepurposingSuggestions = useCallback(async () => {
-    if (!summary || isLoadingRepurposingSuggestions || !API_KEY_CONFIGURED) {
+    if (!summary || isLoadingRepurposingSuggestions) {
       if (!summary) setRepurposingSuggestionsError("No summary available to generate ideas from.");
-      else if (!API_KEY_CONFIGURED) setRepurposingSuggestionsError("API Key not configured.");
       return;
     }
     setIsLoadingRepurposingSuggestions(true);
@@ -354,9 +371,8 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
   }, [summary, pdfText, isLoadingRepurposingSuggestions]);
 
   const handleGenerateQuiz = useCallback(async () => {
-    if (!summary || isLoadingQuiz || !API_KEY_CONFIGURED) {
+    if (!summary || isLoadingQuiz) {
       if (!summary) setQuizError("No summary available to generate a quiz from.");
-      else if (!API_KEY_CONFIGURED) setQuizError("API Key not configured.");
       return;
     }
     setIsLoadingQuiz(true);
@@ -386,9 +402,8 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
   };
 
   const handleGenerateFurtherReading = useCallback(async () => {
-    if (!summary || isLoadingFurtherReading || !API_KEY_CONFIGURED) {
+    if (!summary || isLoadingFurtherReading) {
       if (!summary) setFurtherReadingError("No summary available to generate exploration ideas from.");
-      else if (!API_KEY_CONFIGURED) setFurtherReadingError("API Key not configured.");
       return;
     }
     setIsLoadingFurtherReading(true);
@@ -488,10 +503,12 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
     setIsGeneratingAllAudio(false); if (overallError) setPodcastAudioError("One or more audio segments failed.");
   }, [podcastScript, isGeneratingAllAudio]);
 
-  useEffect(() => { // Auto-generate audio if script is available and audio hasn't been initiated for this script content
-    const canTrigger = podcastScript && !podcastScript.startsWith("Error:") && !podcastScript.startsWith("RATE_LIMIT_ERROR::") && !isLoadingPodcastScript && !isGeneratingAllAudio && API_KEY_CONFIGURED;
-    if (canTrigger && autoAudioInitiatedForScriptContentRef.current !== podcastScript) {
-      autoAudioInitiatedForScriptContentRef.current = podcastScript; 
+  // --- Fix: Only auto-generate podcast audio ONCE per script ---
+  const lastAudioScriptRef = useRef<string | null>(null);
+  useEffect(() => {
+    const canTrigger = podcastScript && !podcastScript.startsWith("Error:") && !podcastScript.startsWith("RATE_LIMIT_ERROR::") && !isLoadingPodcastScript && !isGeneratingAllAudio;
+    if (canTrigger && lastAudioScriptRef.current !== podcastScript) {
+      lastAudioScriptRef.current = podcastScript;
       handleGenerateAllPodcastAudio();
     }
   }, [podcastScript, isLoadingPodcastScript, isGeneratingAllAudio, handleGenerateAllPodcastAudio]);
@@ -675,12 +692,12 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
 
   const showAppLevelLoader =
     dynamicLoaderText !== null || 
-    (!API_KEY_CONFIGURED && !error && !pdfName && !initialNote && !pdfFile); 
+    (!error && !pdfName && !initialNote && !pdfFile); 
 
   if (showAppLevelLoader) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-slate-200">
-        {!API_KEY_CONFIGURED && !error && !initialNote && !pdfFile && !dynamicLoaderText && (
+        {!error && !initialNote && !pdfFile && !dynamicLoaderText && (
           <div className="mb-4 w-full max-w-md"><Alert message="API Key not configured. Features will be limited." type="error" /></div>
         )}
         {dynamicLoaderText && <Spinner text={dynamicLoaderText} size="lg" color="text-slate-200" />}
@@ -765,7 +782,8 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
                 <div className="p-4 md:p-6 flex-shrink-0"> 
                     <h1 className="text-xl md:text-2xl font-bold text-slate-100 mb-1">{cleanedPdfNameForDetails}</h1>
                     <p className="text-xs text-slate-400 mb-4">1 source</p>
-                    <div className="prose prose-sm prose-invert max-w-none text-slate-300 whitespace-pre-wrap mb-6" dangerouslySetInnerHTML={{ __html: summary.replace(/\n/g, '<br />') }}></div>
+                    <div className="prose prose-sm prose-invert max-w-none text-slate-300 whitespace-pre-wrap mb-6"
+  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderMarkdown(summary || '')) }}></div>
                     
                     <div className="flex flex-wrap items-center gap-2 mb-6">
                         
@@ -779,7 +797,7 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
                         </button>
                         <button
                             onClick={handleGenerateRepurposingSuggestions}
-                            disabled={!summary || isLoadingRepurposingSuggestions || !API_KEY_CONFIGURED}
+                            disabled={!summary || isLoadingRepurposingSuggestions}
                             className="text-xs bg-slate-700 hover:bg-slate-600 py-1.5 px-3 rounded-md flex items-center disabled:opacity-50"
                             aria-live="polite"
                         >
@@ -787,7 +805,7 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
                         </button>
                          <button
                             onClick={handleGenerateQuiz}
-                            disabled={!summary || isLoadingQuiz || !API_KEY_CONFIGURED}
+                            disabled={!summary || isLoadingQuiz}
                             className="text-xs bg-slate-700 hover:bg-slate-600 py-1.5 px-3 rounded-md flex items-center disabled:opacity-50"
                             aria-live="polite"
                         >
@@ -795,7 +813,7 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
                         </button>
                         <button
                             onClick={handleGenerateFurtherReading}
-                            disabled={!summary || isLoadingFurtherReading || !API_KEY_CONFIGURED}
+                            disabled={!summary || isLoadingFurtherReading}
                             className="text-xs bg-slate-700 hover:bg-slate-600 py-1.5 px-3 rounded-md flex items-center disabled:opacity-50"
                             aria-live="polite"
                         >
@@ -862,7 +880,7 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
                 </div>
             ) : (
                  <div className="flex-1 flex items-center justify-center text-slate-400 p-4 text-center">
-                    {API_KEY_CONFIGURED ? (pdfText ? "Summary not available." : "No PDF loaded. Use 'Add' in Sources or go to Dashboard to create a new note.") : "API Key not configured. Summary generation disabled."}
+                    {pdfText ? "Summary not available." : "No PDF loaded. Use 'Add' in Sources or go to Dashboard to create a new note."}
                 </div>
             )}
 
@@ -878,7 +896,12 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
                             : { bottom: '-7px', left: '10px', borderLeft: '7px solid transparent', borderRight: '7px solid transparent', borderTop: `7px solid ${aiBubbleColorHex}` }
                           }
                         ></div>
-                        <div className="px-3 py-2 sm:px-4"><p className="text-sm whitespace-pre-wrap">{msg.text}</p></div>
+                        <div className="px-3 py-2 sm:px-4">
+                          {msg.role === 'model' 
+                            ? <div className="text-sm whitespace-pre-wrap prose prose-invert" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderMarkdown(msg.text)) }} />
+                            : <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                          }
+                        </div>
                       </div>
                     </div>
                 ))}
@@ -902,12 +925,12 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
                             onKeyPress={(e) => e.key === 'Enter' && !isLoadingChat && handleSendMessage()}
                             placeholder="Start typing..."
                             className="flex-grow p-2 bg-transparent border-none rounded-md focus:ring-0 text-sm text-slate-200 placeholder-slate-400"
-                            disabled={isLoadingChat || !pdfText || !API_KEY_CONFIGURED}
+                            disabled={isLoadingChat || !pdfText}
                         />
                         <span className="text-xs text-slate-400 pr-1 hidden sm:inline">1 source</span>
                         <button
                             onClick={handleSendMessage}
-                            disabled={isLoadingChat || !pdfText || !userInput.trim() || !API_KEY_CONFIGURED}
+                            disabled={isLoadingChat || !pdfText || !userInput.trim()}
                             className="p-2 sm:p-2.5 bg-purple-600 text-white rounded-full hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center"
                             aria-label="Send message"
                         >
@@ -975,7 +998,7 @@ const App: React.FC<AppProps> = ({ initialNote, initialFile, onInitialFileProces
               <div className="flex-1 flex flex-col min-h-0"> 
                 <div className="flex justify-between items-center mb-2">
                     <h3 className="text-md font-semibold text-slate-200">Transcript</h3>
-                    {React.cloneElement(ELLIPSIS_VERTICAL_ICON, {className: "w-5 h-5 text-slate-400 hover:text-slate-100 cursor-pointer"})}
+                                       {React.cloneElement(ELLIPSIS_VERTICAL_ICON, {className: "w-5 h-5 text-slate-400 hover:text-slate-100 cursor-pointer"})}
                   </div>
                 <audio ref={audioPlayerRef} className="w-full h-10 rounded-md bg-slate-700 overflow-hidden" controls style={{ display: 'none' }}>
                   {podcastSegments.map((segment) => (
